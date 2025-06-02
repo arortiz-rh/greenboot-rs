@@ -145,6 +145,9 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
         },
     };
 
+    // While the code for the binaries and script files will be largely the same, they'll be seperate
+    // because they both require different commands to run.
+
     for entry in entries_sh.flatten() {
         // Process script name
         let script_name = match entry.file_name().and_then(|n| n.to_str()) {
@@ -165,6 +168,50 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
 
         // Execute script and handle output
         let output = Command::new("bash").arg("-C").arg(&entry).output(); // This must be kept since bash scripts by default need this to run
+
+        match output {
+            Ok(o) if o.status.success() => {
+                log::info!("{} script {} success!", name, entry.to_string_lossy());
+            }
+            Ok(o) => {
+                let error_msg = format!(
+                    "{} script {} failed!\n{}\n{}",
+                    name,
+                    entry.to_string_lossy(),
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                );
+                result.errors.push(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error_msg,
+                )));
+            }
+            Err(e) => {
+                result.errors.push(Box::new(e));
+            }
+        }
+    }
+
+    for entry in entries_binaries.into_iter().flatten() {
+        // Process script name
+        let script_name = match entry.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name,
+            None => continue,
+        };
+
+        // Check if script should be skipped
+        if let Some(disabled) = disabled_scripts {
+            if disabled.contains(&script_name.to_string()) {
+                log::info!("Skipping disabled script: {}", script_name);
+                result.skipped.push(script_name.to_string());
+                continue;
+            }
+        }
+
+        log::info!("running {} check {}", name, entry.to_string_lossy());
+
+        // Execute script and handle output
+        let output = Command::new("./").arg(&entry).output(); // This must be kept since bash scripts by default need this to run
 
         match output {
             Ok(o) if o.status.success() => {
