@@ -113,32 +113,53 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
 
     // Have two different sturctures for binaries and shell scripts because the latter doesn't have
     // executable permisions by default and may require a different command to run than binaries.
-    let entries_binaries = match glob(&format!("{}*", path)) {
+    // let entries_binaries = match glob(&format!("{}*", path)) {
+    //     Ok(e) => {
+    //         let binaries: Vec<_> = e
+    //         .filter_map(Result::ok)
+    //         .filter(|entry| {
+    //             if let Ok(metadata) = fs::metadata(entry) {
+    //                 let mode = metadata.permissions().mode();
+    //                 metadata.is_file()
+    //                 && entry.extension().and_then(|ext| ext.to_str()) != Some("sh")
+    //                 && (mode & 0o001 != 0 || mode & 0o010 != 0 || mode & 0o100 != 0)
+    //             } else {
+    //                 false
+    //             }
+    //         })
+    //         .collect();
+    //         Some(binaries)
+    //     }
+    //     Err(_e) => None,
+    // };
+
+    // // Handle glob pattern error early
+    // let entries_sh = match glob(&format!("{}*.sh", path)) {
+    //     Ok(e) => e,
+    //     Err(e) => {
+    //         result.errors.push(Box::new(e));
+    //         return result;
+    //     },
+    // };
+
+    let entries = match glob(&format!("{}*", path)) {
         Ok(e) => {
-            let binaries: Vec<_> = e
+            let valid: Vec<_> = e
             .filter_map(Result::ok)
             .filter(|entry| {
                 if let Ok(metadata) = fs::metadata(entry) {
                     let mode = metadata.permissions().mode();
                     metadata.is_file()
-                    && entry.extension().and_then(|ext| ext.to_str()) != Some("sh")
+                    && entry.extension().and_then(|ext| ext.to_str()) != Some("d")
                     && (mode & 0o001 != 0 || mode & 0o010 != 0 || mode & 0o100 != 0)
                 } else {
                     false
                 }
             })
             .collect();
-            Some(binaries)
-        }
-        Err(e) => {
-            result.errors.push(Box::new(e));
-            return result;
-        }
-    };
-
-    // Handle glob pattern error early
-    let entries_sh = match glob(&format!("{}*.sh", path)) {
-        Ok(e) => e,
+            dbg!(Some(valid.clone()));
+            Some(valid).into_iter()
+        },
         Err(e) => {
             result.errors.push(Box::new(e));
             return result;
@@ -148,7 +169,7 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
     // While the code for the binaries and script files will be largely the same, they'll be seperate
     // because they both require different commands to run.
 
-    for entry in entries_sh.flatten() {
+    for entry in entries.flatten() {
         // Process script name
         let script_name = match entry.file_name().and_then(|n| n.to_str()) {
             Some(name) => name,
@@ -157,17 +178,25 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
 
         // Check if script should be skipped
         if let Some(disabled) = disabled_scripts {
+            dbg!(disabled_scripts);
+            dbg!(Some(disabled));
+            dbg!(&script_name.to_string());
             if disabled.contains(&script_name.to_string()) {
                 log::info!("Skipping disabled script: {}", script_name);
                 result.skipped.push(script_name.to_string());
+                dbg!(script_name.to_string());
                 continue;
             }
         }
 
         log::info!("running {} check {}", name, entry.to_string_lossy());
 
-        // Execute script and handle output
-        let output = Command::new("bash").arg("-C").arg(&entry).output(); // This must be kept since bash scripts by default need this to run
+        // Execute script or binary and handle output
+        let output = if entry.extension().and_then(|ext| ext.to_str()) == Some("sh") {
+            Command::new("bash").arg(&entry).output()
+        } else {
+            Command::new(&entry).output()
+        };
 
         match output {
             Ok(o) if o.status.success() => {
@@ -192,49 +221,49 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
         }
     }
 
-    for entry in entries_binaries.into_iter().flatten() {
-        // Process script name
-        let script_name = match entry.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name,
-            None => continue,
-        };
+    // for entry in entries_binaries.into_iter().flatten() {
+    //     // Process script name
+    //     let binary_name = match entry.file_name().and_then(|n| n.to_str()) {
+    //         Some(name) => name,
+    //         None => continue,
+    //     };
 
-        // Check if script should be skipped
-        if let Some(disabled) = disabled_scripts {
-            if disabled.contains(&script_name.to_string()) {
-                log::info!("Skipping disabled script: {}", script_name);
-                result.skipped.push(script_name.to_string());
-                continue;
-            }
-        }
+    //     // Check if script should be skipped
+    //     if let Some(disabled) = disabled_scripts {
+    //         if disabled.contains(&binary_name.to_string()) {
+    //             log::info!("Skipping disabled binary: {}", binary_name);
+    //             result.skipped.push(binary_name.to_string());
+    //             continue;
+    //         }
+    //     }
 
-        log::info!("running {} check {}", name, entry.to_string_lossy());
+    //     log::info!("running {} check {}", name, entry.to_string_lossy());
 
-        // Execute script and handle output
-        let output = Command::new("./").arg(&entry).output(); // This must be kept since bash scripts by default need this to run
+    //     // Execute script and handle output
+    //     let output = Command::new(&entry).output(); // This must be kept since bash scripts by default need this to run
 
-        match output {
-            Ok(o) if o.status.success() => {
-                log::info!("{} script {} success!", name, entry.to_string_lossy());
-            }
-            Ok(o) => {
-                let error_msg = format!(
-                    "{} script {} failed!\n{}\n{}",
-                    name,
-                    entry.to_string_lossy(),
-                    String::from_utf8_lossy(&o.stdout),
-                    String::from_utf8_lossy(&o.stderr)
-                );
-                result.errors.push(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error_msg,
-                )));
-            }
-            Err(e) => {
-                result.errors.push(Box::new(e));
-            }
-        }
-    }
+    //     match output {
+    //         Ok(o) if o.status.success() => {
+    //             log::info!("{} script {} success!", name, entry.to_string_lossy());
+    //         }
+    //         Ok(o) => {
+    //             let error_msg = format!(
+    //                 "{} script {} failed!\n{}\n{}",
+    //                 name,
+    //                 entry.to_string_lossy(),
+    //                 String::from_utf8_lossy(&o.stdout),
+    //                 String::from_utf8_lossy(&o.stderr)
+    //             );
+    //             result.errors.push(Box::new(std::io::Error::new(
+    //                 std::io::ErrorKind::Other,
+    //                 error_msg,
+    //             )));
+    //         }
+    //         Err(e) => {
+    //             result.errors.push(Box::new(e));
+    //         }
+    //     }
+    // }
 
     result
 }
@@ -251,6 +280,10 @@ mod test {
     // No change needed here for me, this doesn't involve executing any scripts.
     #[test]
     fn missing_required_folder() {
+        let required_path = format!("{}/check/required.d", GREENBOOT_INSTALL_PATHS[1]);
+        if Path::new(&required_path).exists() {
+            fs::remove_dir_all(&required_path).unwrap();
+        }
         assert_eq!(
             run_diagnostics(vec![]).unwrap_err().to_string(),
             String::from("cannot find any required.d folder")
@@ -258,7 +291,6 @@ mod test {
     }
 
     #[test]
-    // This tests the output of something I will have changed, but I don't need to change anything for this test.
     fn test_passed_diagnostics() {
         setup_folder_structure(true)
             .context("Test setup failed")
@@ -292,7 +324,7 @@ mod test {
         // Try to skip a script that doesn't exist
         let state = run_diagnostics(vec![nonexistent_script_name.clone()]);
         assert!(
-            state.unwrap().contains(&nonexistent_script_name),
+            state.expect("Error in nonexistent checking").contains(&nonexistent_script_name),
             "non existent script names did not match"
         );
 
@@ -307,9 +339,26 @@ mod test {
 
         // Skip the failing script in required.d
         let state = run_diagnostics(vec!["failing_script.sh".to_string()]);
+        dbg!(run_diagnostics(vec!["failing_binary".to_string()]));
         assert!(
             state.is_ok(),
             "Should pass when skipping failing required script"
+        );
+
+        tear_down().context("Test teardown failed").unwrap();
+    }
+
+    #[test]
+    fn test_skip_failing_binary() {
+        setup_folder_structure(false)
+            .context("Test setup failed")
+            .unwrap();
+
+        // Skip the failing script in required.d
+        let state = run_diagnostics(vec!["failing_binary".to_string()]);
+        assert!(
+            state.is_ok(),
+            "Should pass when skipping failing required binary"
         );
 
         tear_down().context("Test teardown failed").unwrap();
@@ -320,6 +369,8 @@ mod test {
         let wanted_path = format!("{}/check/wanted.d", GREENBOOT_INSTALL_PATHS[1]);
         let passing_test_scripts = "testing_assets/passing_script.sh";
         let failing_test_scripts = "testing_assets/failing_script.sh";
+        let passing_test_binary = "testing_assets/passing_binary";
+        let failing_test_binary = "testing_assets/failing_binary";
 
         fs::create_dir_all(&required_path).expect("cannot create folder");
         fs::create_dir_all(&wanted_path).expect("cannot create folder");
@@ -337,6 +388,19 @@ mod test {
         )
         .context("unable to copy passing script to wanted.d")?;
 
+        // Create passing binary in both required and wanted
+        fs::copy(
+            passing_test_binary,
+            format!("{}/passing_binary", &required_path),
+        )
+        .context("unable to copy passing binary to wanted.d")?;
+
+        fs::copy(
+            passing_test_binary,
+            format!("{}/passing_binary", &wanted_path),
+        )
+        .context("unable to copy passing binary to wanted.d")?;
+
         // Create failing script in wanted.d
         fs::copy(
             failing_test_scripts,
@@ -344,11 +408,24 @@ mod test {
         )
         .context("unable to copy failing script to wanted.d")?;
 
+        // Create failing binary in wanted.d
+        fs::copy(
+            failing_test_binary,
+            format!("{}/failing_binary", &wanted_path),
+        )
+        .context("unable to copy failing binary to wanted.d")?;
+
         if !passing {
             // Create failing script in required.d for failure cases
             fs::copy(
                 failing_test_scripts,
                 format!("{}/failing_script.sh", &required_path),
+            )
+            .context("unable to copy failing script to required.d")?;
+            
+            fs::copy(
+                failing_test_binary,
+                format!("{}/failing_binary", &required_path),
             )
             .context("unable to copy failing script to required.d")?;
         }
@@ -359,4 +436,5 @@ mod test {
         fs::remove_dir_all(GREENBOOT_INSTALL_PATHS[1]).expect("Unable to delete folder");
         Ok(())
     }
+
 }
