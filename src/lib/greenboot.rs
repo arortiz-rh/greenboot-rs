@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::path::Path;
 use std::process::Command;
-use std::os::unix::fs::PermissionsExt; // ! This is new ! May need to add to the .spec file that this is needed.
+use std::os::unix::fs::PermissionsExt;
 use std::fs;
 
 /// dir that greenboot looks for the health check and other scripts
@@ -111,37 +111,6 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
         skipped: Vec::new(),
     };
 
-    // Have two different sturctures for binaries and shell scripts because the latter doesn't have
-    // executable permisions by default and may require a different command to run than binaries.
-    // let entries_binaries = match glob(&format!("{}*", path)) {
-    //     Ok(e) => {
-    //         let binaries: Vec<_> = e
-    //         .filter_map(Result::ok)
-    //         .filter(|entry| {
-    //             if let Ok(metadata) = fs::metadata(entry) {
-    //                 let mode = metadata.permissions().mode();
-    //                 metadata.is_file()
-    //                 && entry.extension().and_then(|ext| ext.to_str()) != Some("sh")
-    //                 && (mode & 0o001 != 0 || mode & 0o010 != 0 || mode & 0o100 != 0)
-    //             } else {
-    //                 false
-    //             }
-    //         })
-    //         .collect();
-    //         Some(binaries)
-    //     }
-    //     Err(_e) => None,
-    // };
-
-    // // Handle glob pattern error early
-    // let entries_sh = match glob(&format!("{}*.sh", path)) {
-    //     Ok(e) => e,
-    //     Err(e) => {
-    //         result.errors.push(Box::new(e));
-    //         return result;
-    //     },
-    // };
-
     let entries = match glob(&format!("{}*", path)) {
         Ok(e) => {
             let valid: Vec<_> = e
@@ -157,7 +126,6 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
                 }
             })
             .collect();
-            dbg!(Some(valid.clone()));
             Some(valid).into_iter()
         },
         Err(e) => {
@@ -165,9 +133,6 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
             return result;
         },
     };
-
-    // While the code for the binaries and script files will be largely the same, they'll be seperate
-    // because they both require different commands to run.
 
     for entry in entries.flatten() {
         // Process script name
@@ -178,13 +143,9 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
 
         // Check if script should be skipped
         if let Some(disabled) = disabled_scripts {
-            dbg!(disabled_scripts);
-            dbg!(Some(disabled));
-            dbg!(&script_name.to_string());
             if disabled.contains(&script_name.to_string()) {
                 log::info!("Skipping disabled script: {}", script_name);
                 result.skipped.push(script_name.to_string());
-                dbg!(script_name.to_string());
                 continue;
             }
         }
@@ -221,50 +182,6 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
         }
     }
 
-    // for entry in entries_binaries.into_iter().flatten() {
-    //     // Process script name
-    //     let binary_name = match entry.file_name().and_then(|n| n.to_str()) {
-    //         Some(name) => name,
-    //         None => continue,
-    //     };
-
-    //     // Check if script should be skipped
-    //     if let Some(disabled) = disabled_scripts {
-    //         if disabled.contains(&binary_name.to_string()) {
-    //             log::info!("Skipping disabled binary: {}", binary_name);
-    //             result.skipped.push(binary_name.to_string());
-    //             continue;
-    //         }
-    //     }
-
-    //     log::info!("running {} check {}", name, entry.to_string_lossy());
-
-    //     // Execute script and handle output
-    //     let output = Command::new(&entry).output(); // This must be kept since bash scripts by default need this to run
-
-    //     match output {
-    //         Ok(o) if o.status.success() => {
-    //             log::info!("{} script {} success!", name, entry.to_string_lossy());
-    //         }
-    //         Ok(o) => {
-    //             let error_msg = format!(
-    //                 "{} script {} failed!\n{}\n{}",
-    //                 name,
-    //                 entry.to_string_lossy(),
-    //                 String::from_utf8_lossy(&o.stdout),
-    //                 String::from_utf8_lossy(&o.stderr)
-    //             );
-    //             result.errors.push(Box::new(std::io::Error::new(
-    //                 std::io::ErrorKind::Other,
-    //                 error_msg,
-    //             )));
-    //         }
-    //         Err(e) => {
-    //             result.errors.push(Box::new(e));
-    //         }
-    //     }
-    // }
-
     result
 }
 
@@ -277,7 +194,6 @@ mod test {
     static GREENBOOT_INSTALL_PATHS: [&str; 2] = ["/usr/lib/greenboot", "/etc/greenboot"];
 
     /// validate when the required folder is not found
-    // No change needed here for me, this doesn't involve executing any scripts.
     #[test]
     fn missing_required_folder() {
         let required_path = format!("{}/check/required.d", GREENBOOT_INSTALL_PATHS[1]);
@@ -301,7 +217,6 @@ mod test {
     }
 
     #[test]
-    // Same as previous function.
     fn test_failed_diagnostics() {
         setup_folder_structure(false)
             .context("Test setup failed")
@@ -312,9 +227,6 @@ mod test {
     }
 
     #[test]
-    // ! This many need to be changed !
-    // It's test requires a .sh file, which I most likely will leave alone, but I just wanted to make this
-    // for myself since I may need to add something extra for binary files.
     fn test_skip_nonexistent_script() {
         let nonexistent_script_name = "nonexistent_script.sh".to_string();
         setup_folder_structure(true)
@@ -337,9 +249,12 @@ mod test {
             .context("Test setup failed")
             .unwrap();
 
+        // Only testing scripts in this test. Including extra failing binary causes failure.
+        let required_path = format!("{}/check/required.d", GREENBOOT_INSTALL_PATHS[1]);
+        let _ = std::fs::remove_file(format!("{}/failing_binary", required_path));    
+        
         // Skip the failing script in required.d
         let state = run_diagnostics(vec!["failing_script.sh".to_string()]);
-        dbg!(run_diagnostics(vec!["failing_binary".to_string()]));
         assert!(
             state.is_ok(),
             "Should pass when skipping failing required script"
@@ -353,6 +268,10 @@ mod test {
         setup_folder_structure(false)
             .context("Test setup failed")
             .unwrap();
+
+        // Only testing binary in this test. Including extra failing script causes failure.
+        let required_path = format!("{}/check/required.d", GREENBOOT_INSTALL_PATHS[1]);
+        let _ = std::fs::remove_file(format!("{}/failing_script.sh", required_path));
 
         // Skip the failing script in required.d
         let state = run_diagnostics(vec!["failing_binary".to_string()]);
