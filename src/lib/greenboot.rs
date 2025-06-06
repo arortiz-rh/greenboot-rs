@@ -31,7 +31,7 @@ pub fn run_diagnostics(skipped: Vec<String>) -> Result<Vec<String>> {
         all_skipped.extend(result.skipped);
 
         if !result.errors.is_empty() {
-            log::error!("required script error:");
+            log::error!("required script or binary error:");
             result.errors.iter().for_each(|e| log::error!("{e}"));
             required_script_failure = true;
         }
@@ -48,7 +48,7 @@ pub fn run_diagnostics(skipped: Vec<String>) -> Result<Vec<String>> {
         all_skipped.extend(result.skipped);
 
         if !result.errors.is_empty() {
-            log::warn!("wanted script runner error:");
+            log::warn!("wanted script/binary runner error:");
             result.errors.iter().for_each(|e| log::error!("{e}"));
         }
     }
@@ -61,7 +61,7 @@ pub fn run_diagnostics(skipped: Vec<String>) -> Result<Vec<String>> {
 
     if !missing_disabled.is_empty() {
         log::warn!(
-            "The following disabled scripts were not found in any directory: {:?}",
+            "The following disabled scripts or binaries were not found in any directory: {:?}",
             missing_disabled
         );
     }
@@ -144,7 +144,7 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
         // Check if script should be skipped
         if let Some(disabled) = disabled_scripts {
             if disabled.contains(&script_name.to_string()) {
-                log::info!("Skipping disabled script: {}", script_name);
+                log::info!("Skipping disabled script/binary: {}", script_name);
                 result.skipped.push(script_name.to_string());
                 continue;
             }
@@ -161,11 +161,11 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
 
         match output {
             Ok(o) if o.status.success() => {
-                log::info!("{} script {} success!", name, entry.to_string_lossy());
+                log::info!("{} script/binary {} success!", name, entry.to_string_lossy());
             }
             Ok(o) => {
                 let error_msg = format!(
-                    "{} script {} failed!\n{}\n{}",
+                    "{} script/binary {} failed!\n{}\n{}",
                     name,
                     entry.to_string_lossy(),
                     String::from_utf8_lossy(&o.stdout),
